@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
 
 // var _ = net.Listen
@@ -39,16 +40,57 @@ func main() {
 
 			buf := make([]byte, 1024) //make()-> does memory allocation similar to new()
 			//slice of byte is created to hold incoming data
+			store := make(map[string]string)
 
 			for {
-				_, err = conn.Read(buf)
+				n, err := conn.Read(buf)
 
 				if err != nil {
 					break // sender has stopped sending commands
 				}
 
-				conn.Write([]byte("+PONG\r\n")) //Redis client libraries (especially in languages like Go) use a slice of bytes ([]byte) instead of standard strings because slices of bytes prevent memory allocations and reduce CPU overhead.
+				input := string(buf[:n]) //converts a byte slice (buf) into a string.
+
+				parts := strings.Split(input, "\r\n")
+
+				cmd := strings.ToUpper(parts[2])
+
+				switch cmd {
+
+				case "PING":
+					conn.Write([]byte("+PONG\r\n")) //Redis client libraries (especially in languages like Go) use a slice of bytes ([]byte) instead of standard strings because slices of bytes prevent memory allocations and reduce CPU overhead.
 				//also Network sockets read data directly into byte buffers. If the library returned a string, it would have to copy those bytes into a brand new string object in memory. Returning []byte allows the library to pass a direct pointer to the network data without copying it.
+
+				case "ECHO":
+					message := parts[4]
+
+					response := fmt.Sprintf("$%d\r\n%s\r\n", len(message), message)
+
+					conn.Write([]byte(response))
+
+					//saving set key value pairs in map
+				case "SET":
+
+					key := parts[4]
+
+					value := parts[6]
+
+					store[key] = value
+
+					response := fmt.Sprintf("+OK\r\n")
+					conn.Write([]byte(response))
+
+				case "GET":
+
+					key := parts[4]
+
+					value := store[key]
+
+					response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+
+					conn.Write([]byte(response))
+				}
+
 			}
 		}()
 
