@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // var _ = net.Listen
@@ -19,6 +21,9 @@ func main() {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
+	store := make(map[string]string)
+
+	expiry := make(map[string]time.Time) //outside becasue redis has shared database
 
 	for {
 
@@ -40,7 +45,6 @@ func main() {
 
 			buf := make([]byte, 1024) //make()-> does memory allocation similar to new()
 			//slice of byte is created to hold incoming data
-			store := make(map[string]string)
 
 			for {
 				n, err := conn.Read(buf)
@@ -77,20 +81,62 @@ func main() {
 
 					store[key] = value
 
+					//Atoi (short for "ASCII to integer") is a function in the strconv package used to convert a string representation of a base-10 number into an int.
+
+					if len(parts) > 8 {
+
+						option := strings.ToUpper(parts[8])
+
+						if option == "PX" {
+
+							durationMs, _ := strconv.Atoi(parts[10])
+
+							expiry[key] = time.Now().Add(
+								time.Duration(durationMs) * time.Millisecond,
+							)
+						} else {
+							sec, _ := strconv.Atoi(parts[10])
+
+							expiry[key] = time.Now().Add(
+								time.Duration(sec) * time.Second)
+						}
+					}
+
 					response := fmt.Sprintf("+OK\r\n")
 					conn.Write([]byte(response))
 
 				case "GET":
 
 					key := parts[4]
+					expTime, exists := expiry[key]
 
-					value := store[key]
+					if exists && time.Now().After(expTime) {
 
-					response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+						delete(store, key)
+						delete(expiry, key)
 
-					conn.Write([]byte(response))
+						conn.Write([]byte("$-1\r\n"))
+
+					} else {
+
+						value, exists := store[key]
+
+						if !exists {
+
+							conn.Write([]byte("$-1\r\n"))
+
+						} else {
+
+							response := fmt.Sprintf(
+								"$%d\r\n%s\r\n",
+								len(value),
+								value,
+							)
+
+							conn.Write([]byte(response))
+						}
+					}
 				}
-
 			}
 		}()
 
