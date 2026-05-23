@@ -141,9 +141,13 @@ func main() {
 
 				case "RPUSH":
 					key := parts[4]
-					value := parts[6]
+					values := []string{}
 
-					HandleList(conn, list, key, value)
+					for i := 6; i < len(parts); i += 2 {
+						values = append(values, parts[i])
+					}
+
+					HandleList(conn, list, key, values)
 				}
 			}
 		}()

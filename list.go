@@ -5,9 +5,11 @@ import (
 	"net"
 )
 
-func HandleList(conn net.Conn, list map[string][]string, key string, value string) {
+func HandleList(conn net.Conn, list map[string][]string, key string, values []string) {
 
-	list[key] = append(list[key], value)
+	for idx := 0; idx < len(values); idx++ {
+		list[key] = append(list[key], values[idx])
+	}
 
 	length := len(list[key])
 
