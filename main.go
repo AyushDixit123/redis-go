@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"redis-go/list"
 )
 
 // var _ = net.Listen
@@ -25,7 +27,7 @@ func main() {
 
 	expiry := make(map[string]time.Time) //outside becasue redis has shared database
 
-	list := make(map[string][]string)
+	liststore := make(map[string][]string)
 
 	for {
 
@@ -147,7 +149,7 @@ func main() {
 						values = append(values, parts[i])
 					}
 
-					HandleList(conn, list, key, values)
+					list.HandleList(conn, liststore, key, values)
 				}
 			}
 		}()
