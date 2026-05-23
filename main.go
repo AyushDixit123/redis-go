@@ -25,6 +25,8 @@ func main() {
 
 	expiry := make(map[string]time.Time) //outside becasue redis has shared database
 
+	list := make(map[string][]string)
+
 	for {
 
 		conn, err := l.Accept()
@@ -83,7 +85,7 @@ func main() {
 
 					//Atoi (short for "ASCII to integer") is a function in the strconv package used to convert a string representation of a base-10 number into an int.
 
-					if len(parts) > 8 {
+					if len(parts) > 8 { // if exp used
 
 						option := strings.ToUpper(parts[8])
 
@@ -136,6 +138,12 @@ func main() {
 							conn.Write([]byte(response))
 						}
 					}
+
+				case "RPUSH":
+					key := parts[4]
+					value := parts[6]
+
+					HandleList(conn, list, key, value)
 				}
 			}
 		}()
