@@ -155,7 +155,7 @@ func main() {
 						values = append(values, parts[i])
 					}
 
-					list.HandleList(conn, liststore, key, values, true)
+					list.HandleList(conn, liststore, key, values, 0) //0 fro RPush 1 fro Lpush 2 for Llen
 
 				case "LRANGE":
 					key := parts[4]
@@ -181,7 +181,15 @@ func main() {
 						values = append(values, parts[i])
 					}
 
-					list.HandleList(conn, liststore, key, values, false)
+					list.HandleList(conn, liststore, key, values, 1)
+
+				case "LLEN":
+
+					key := parts[4]
+
+					values := []string{}
+
+					list.HandleList(conn, liststore, key, values, 2)
 
 				}
 			}

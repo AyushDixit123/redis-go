@@ -5,9 +5,9 @@ import (
 	"net"
 )
 
-func HandleList(conn net.Conn, list map[string][]string, key string, values []string, lpush bool) {
+func HandleList(conn net.Conn, list map[string][]string, key string, values []string, num int) {
 
-	if lpush {
+	if num == 0 {
 		for idx := 0; idx < len(values); idx++ {
 			list[key] = append(list[key], values[idx])
 		}
@@ -18,11 +18,18 @@ func HandleList(conn net.Conn, list map[string][]string, key string, values []st
 		response := fmt.Sprintf(":%d\r\n", length)
 
 		conn.Write([]byte(response))
-	} else {
+	} else if num == 1 {
 		for idx := 0; idx < len(values); idx++ {
 			list[key] = append([]string{values[idx]}, list[key]...)
 		}
 
+		length := len(list[key])
+
+		// RESP Integer
+		response := fmt.Sprintf(":%d\r\n", length)
+
+		conn.Write([]byte(response))
+	} else if num == 2 {
 		length := len(list[key])
 
 		// RESP Integer
