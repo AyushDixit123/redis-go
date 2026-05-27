@@ -191,6 +191,14 @@ func main() {
 
 					list.HandleList(conn, liststore, key, values, 2)
 
+				case "LPOP":
+
+					key := parts[4]
+
+					values := []string{}
+
+					list.HandleList(conn, liststore, key, values, 3)
+
 				}
 			}
 		}()

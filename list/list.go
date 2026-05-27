@@ -36,6 +36,19 @@ func HandleList(conn net.Conn, list map[string][]string, key string, values []st
 		response := fmt.Sprintf(":%d\r\n", length)
 
 		conn.Write([]byte(response))
+	} else if num == 3 {
+
+		value := list[key][0]
+
+		// RESP Bulk String
+		response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+
+		if len(list[key]) > 0 {
+			// Re-slice to exclude the first element (index 0)
+			list[key] = list[key][1:]
+		}
+		conn.Write([]byte(response))
+
 	}
 
 }
