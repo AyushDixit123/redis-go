@@ -3,12 +3,14 @@ package list
 import (
 	"fmt"
 	"net"
+	"strconv"
 )
 
 func HandleList(conn net.Conn, list map[string][]string, key string, values []string, num int) {
 
-	if num == 0 {
-		for idx := 0; idx < len(values); idx++ {
+	switch num {
+	case 0:
+		for idx := range values {
 			list[key] = append(list[key], values[idx])
 		}
 
@@ -18,7 +20,7 @@ func HandleList(conn net.Conn, list map[string][]string, key string, values []st
 		response := fmt.Sprintf(":%d\r\n", length)
 
 		conn.Write([]byte(response))
-	} else if num == 1 {
+	case 1:
 		for idx := 0; idx < len(values); idx++ {
 			list[key] = append([]string{values[idx]}, list[key]...)
 		}
@@ -29,24 +31,67 @@ func HandleList(conn net.Conn, list map[string][]string, key string, values []st
 		response := fmt.Sprintf(":%d\r\n", length)
 
 		conn.Write([]byte(response))
-	} else if num == 2 {
+	case 2:
 		length := len(list[key])
 
 		// RESP Integer
 		response := fmt.Sprintf(":%d\r\n", length)
 
 		conn.Write([]byte(response))
-	} else if num == 3 {
+	case 3:
 
-		value := list[key][0]
-
-		// RESP Bulk String
-		response := fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
-
-		if len(list[key]) > 0 {
-			// Re-slice to exclude the first element (index 0)
-			list[key] = list[key][1:]
+		// Empty list
+		if len(list[key]) == 0 {
+			conn.Write([]byte("$-1\r\n"))
+			return
 		}
+
+		// -----------------------------
+		// NORMAL: LPOP key
+		// Return BULK STRING
+		// -----------------------------
+		if len(values) == 0 {
+
+			value := list[key][0]
+
+			response := fmt.Sprintf(
+				"$%d\r\n%s\r\n",
+				len(value),
+				value,
+			)
+
+			// Remove first element
+			list[key] = list[key][1:]
+
+			conn.Write([]byte(response))
+			return
+		}
+
+		// -----------------------------
+		// LPOP key count
+		// Return RESP ARRAY
+		// -----------------------------
+		count, _ := strconv.Atoi(values[0])
+
+		if count > len(list[key]) {
+			count = len(list[key])
+		}
+
+		response := fmt.Sprintf("*%d\r\n", count)
+
+		for idx := 0; idx < count; idx++ {
+
+			value := list[key][idx]
+
+			response += fmt.Sprintf(
+				"$%d\r\n%s\r\n",
+				len(value),
+				value,
+			)
+		}
+
+		list[key] = list[key][count:]
+
 		conn.Write([]byte(response))
 
 	}

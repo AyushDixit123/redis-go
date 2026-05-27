@@ -196,6 +196,9 @@ func main() {
 					key := parts[4]
 
 					values := []string{}
+					if len(parts) > 6 {
+						values = append(values, parts[6])
+					}
 
 					list.HandleList(conn, liststore, key, values, 3)
 
