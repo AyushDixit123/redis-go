@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"redis-go/list"
+	"github.com/codecrafters-io/redis-starter-go/app/list"
 )
 
 // var _ = net.Listen
@@ -145,11 +145,26 @@ func main() {
 					key := parts[4]
 					values := []string{}
 
+					//Because RESP format alternates between:
+
+					/*length
+					  actual value
+					  length
+					  actual value*/
 					for i := 6; i < len(parts); i += 2 {
 						values = append(values, parts[i])
 					}
 
 					list.HandleList(conn, liststore, key, values)
+
+				case "LRANGE":
+					key := parts[4]
+
+					start := parts[6]
+
+					end := parts[8]
+
+					list.Retrievelist(conn, key, start, end, liststore)
 				}
 			}
 		}()
