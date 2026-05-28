@@ -29,6 +29,8 @@ func main() {
 
 	liststore := make(map[string][]string)
 
+	waiters := make(map[string][]chan string) //key -> list of blocked clients waiting for data
+
 	for {
 
 		conn, err := l.Accept()
@@ -142,20 +144,43 @@ func main() {
 					}
 
 				case "RPUSH":
+
 					key := parts[4]
+
 					values := []string{}
 
-					//Because RESP format alternates between:
-
-					/*length
-					  actual value
-					  length
-					  actual value*/
+					// RESP alternates:
+					// length
+					// actual value
 					for i := 6; i < len(parts); i += 2 {
 						values = append(values, parts[i])
 					}
 
-					list.HandleList(conn, liststore, key, values, 0) //0 fro RPush 1 fro Lpush 2 for Llen
+					handled := false
+
+					// Someone waiting on BLPOP
+					if len(waiters[key]) > 0 {
+						ch := waiters[key][0]
+
+						// Remove first waiting client
+						waiters[key] = waiters[key][1:]
+
+						// Give first pushed value directly
+						ch <- values[0]
+
+						handled = true
+					}
+
+					// No blocked clients
+					if !handled {
+
+						list.HandleList(conn, liststore, key, values, 0)
+
+					} else {
+
+						// Redis still returns pushed length
+						conn.Write([]byte(":1\r\n"))
+					}
 
 				case "LRANGE":
 					key := parts[4]
@@ -169,19 +194,39 @@ func main() {
 				case "LPUSH":
 
 					key := parts[4]
+
 					values := []string{}
 
-					//Because RESP format alternates between:
-
-					/*length
-					  actual value
-					  length
-					  actual value*/
 					for i := 6; i < len(parts); i += 2 {
 						values = append(values, parts[i])
 					}
 
-					list.HandleList(conn, liststore, key, values, 1)
+					handled := false
+
+					// Someone blocked on BLPOP
+					if len(waiters[key]) > 0 {
+
+						ch := waiters[key][0]
+
+						// Remove blocked client
+						waiters[key] = waiters[key][1:]
+
+						// LPUSH inserts from front,
+						// so first visible value is LAST argument
+						ch <- values[len(values)-1]
+
+						handled = true
+					}
+
+					if !handled {
+
+						list.HandleList(conn, liststore, key, values, 1)
+
+					} else {
+
+						// Redis still returns pushed length
+						conn.Write([]byte(":1\r\n"))
+					}
 
 				case "LLEN":
 
@@ -202,6 +247,128 @@ func main() {
 
 					list.HandleList(conn, liststore, key, values, 3)
 
+				// A select statement blocks until one of its cases is ready to execute.Case Execution: Each case must be a channel operation (either sending or receiving data).
+				// 						/select means:
+
+				// "Wait for whichever event happens first."
+
+				case "BLPOP":
+
+					keys := []string{}
+
+					for i := 4; i < len(parts)-2; i += 2 {
+						keys = append(keys, parts[i])
+					}
+
+					// Last argument is timeout
+					timeoutStr := parts[len(parts)-2]
+
+					timeout, _ := strconv.ParseFloat(timeoutStr, 64)
+
+					// -----------------------------------
+					// First check if ANY key already has values
+					// Redis checks LEFT -> RIGHT
+					// -----------------------------------
+
+					found := false
+
+					for _, key := range keys {
+
+						if len(liststore[key]) > 0 {
+
+							value := liststore[key][0]
+
+							// Remove first element
+							liststore[key] = liststore[key][1:]
+
+							response := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
+
+							conn.Write([]byte(response))
+
+							found = true
+
+							break
+						}
+					}
+
+					// -----------------------------------
+					// If some key had value,
+					// already handled
+					// -----------------------------------
+
+					if found {
+						break
+					}
+
+					// -----------------------------------
+					// No list had values
+					// Need to BLOCK
+					// -----------------------------------
+
+					// Create private channel
+					ch := make(chan string)
+
+					// Register waiter on ALL keys
+					for _, key := range keys {
+						waiters[key] = append(waiters[key], ch)
+					}
+
+					// -----------------------------------
+					// timeout = 0
+					// wait forever
+					// -----------------------------------
+
+					if timeout == 0 {
+
+						value := <-ch
+
+						selectedKey := ""
+
+						for _, key := range keys {
+
+							selectedKey = key
+
+							break
+						}
+
+						response := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(selectedKey), selectedKey, len(value), value)
+
+						conn.Write([]byte(response))
+
+					} else {
+
+						select {
+
+						// RPUSH/LPUSH woke client
+						case value := <-ch:
+
+							selectedKey := ""
+
+							for _, key := range keys {
+
+								selectedKey = key
+
+								break
+							}
+
+							response := fmt.Sprintf(
+								"*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n",
+								len(selectedKey),
+								selectedKey,
+								len(value),
+								value,
+							)
+
+							conn.Write([]byte(response))
+
+						// Timeout
+						case <-time.After(
+							time.Duration(timeout * float64(time.Second)),
+						):
+
+							conn.Write([]byte("*-1\r\n"))
+						}
+					}
 				}
 			}
 		}()
