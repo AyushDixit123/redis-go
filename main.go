@@ -6,13 +6,16 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"redis-go/list"
+	"redis-go/transaction"
 )
 
 // var _ = net.Listen
 // var _ = os.Exit
+var waitersMu sync.Mutex //adding mutex to avoud race conditions
 
 func main() {
 
@@ -30,6 +33,9 @@ func main() {
 	liststore := make(map[string][]string)
 
 	waiters := make(map[string][]chan string) //key -> list of blocked clients waiting for data
+
+	intrans := false
+	steps := 0
 
 	for {
 
@@ -158,17 +164,25 @@ func main() {
 
 					handled := false
 
-					// Someone waiting on BLPOP
+					waitersMu.Lock()
+
 					if len(waiters[key]) > 0 {
+
 						ch := waiters[key][0]
 
 						// Remove first waiting client
 						waiters[key] = waiters[key][1:]
 
-						// Give first pushed value directly
+						waitersMu.Unlock()
+
+						// Wake blocked BLPOP
 						ch <- values[0]
 
 						handled = true
+
+					} else {
+
+						waitersMu.Unlock()
 					}
 
 					// No blocked clients
@@ -203,19 +217,25 @@ func main() {
 
 					handled := false
 
-					// Someone blocked on BLPOP
+					waitersMu.Lock()
+
 					if len(waiters[key]) > 0 {
 
 						ch := waiters[key][0]
 
-						// Remove blocked client
+						// Remove first waiting client
 						waiters[key] = waiters[key][1:]
 
-						// LPUSH inserts from front,
-						// so first visible value is LAST argument
+						waitersMu.Unlock()
+
+						// LPUSH inserts at front
 						ch <- values[len(values)-1]
 
 						handled = true
+
+					} else {
+
+						waitersMu.Unlock()
 					}
 
 					if !handled {
@@ -251,6 +271,35 @@ func main() {
 				// 						/select means:
 
 				// "Wait for whichever event happens first."
+
+				case "INCR":
+					key := parts[4]
+
+					values := []string{}
+
+					transaction.Handletransaction(conn, store, key, values)
+				case "MULTI":
+					intrans = true
+					conn.Write([]byte("+OK\r\n"))
+
+				case "EXEC":
+
+					if !intrans {
+						conn.Write([]byte("-ERR EXEC without MULTI\r\n"))
+						continue
+					}
+
+					if steps == 0 {
+						conn.Write([]byte("*0\r\n"))
+
+						intrans = false
+						steps = 0
+
+						continue
+					}
+
+					intrans = false
+					steps = 0
 
 				case "BLPOP":
 
@@ -309,10 +358,11 @@ func main() {
 					ch := make(chan string)
 
 					// Register waiter on ALL keys
+					waitersMu.Lock()
 					for _, key := range keys {
 						waiters[key] = append(waiters[key], ch)
 					}
-
+					waitersMu.Unlock()
 					// -----------------------------------
 					// timeout = 0
 					// wait forever
@@ -365,6 +415,24 @@ func main() {
 						case <-time.After(
 							time.Duration(timeout * float64(time.Second)),
 						):
+
+							waitersMu.Lock()
+
+							for _, key := range keys {
+
+								filtered := []chan string{}
+
+								for _, waiter := range waiters[key] {
+
+									if waiter != ch {
+										filtered = append(filtered, waiter)
+									}
+								}
+
+								waiters[key] = filtered
+							}
+
+							waitersMu.Unlock()
 
 							conn.Write([]byte("*-1\r\n"))
 						}
